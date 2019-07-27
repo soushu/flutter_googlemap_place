@@ -10,6 +10,8 @@
         android:name="io.flutter.app.FlutterApplication"
         android:label="flutter_googlemap_place"
         android:icon="@mipmap/ic_launcher">
+        <meta-data android:name="com.google.android.geo.API_KEY"
+            android:value="Your API Key"/>
         <activity
             android:name=".MainActivity"
             android:launchMode="singleTop"
@@ -29,5 +31,6 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <uses-library android:name="org.apache.http.legacy" android:required="false" />
     </application>
 </manifest>

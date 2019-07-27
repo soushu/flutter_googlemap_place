@@ -1,111 +1,242 @@
+import 'dart:async';
+import 'package:google_maps_webservice/places.dart';
+import 'package:flutter_google_places/flutter_google_places.dart';
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:location/location.dart' as LocationManager;
+import 'place_detail.dart';
 
-void main() => runApp(MyApp());
+const kGoogleApiKey = "Your API Key";
+GoogleMapsPlaces _places = GoogleMapsPlaces(apiKey: kGoogleApiKey);
 
-class MyApp extends StatelessWidget {
-  // This widget is the root of your application.
+void main() {
+  runApp(MaterialApp(
+    title: "flutter_googlemap",
+    home: Home(),
+    debugShowCheckedModeBanner: false,
+  ));
+}
+
+class Home extends StatefulWidget {
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
-        primarySwatch: Colors.blue,
-      ),
-      home: MyHomePage(title: 'Flutter Demo Home Page'),
-    );
+  State<StatefulWidget> createState() {
+    return HomeState();
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  _MyHomePageState createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
+class HomeState extends State<Home> {
+  final homeScaffoldKey = GlobalKey<ScaffoldState>();
+  GoogleMapController mapController;
+  List<PlacesSearchResult> places = [];
+  bool isLoading = false;
+  String errorMessage;
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
+    Widget expandedChild;
+    if (isLoading) {
+      expandedChild = Center(child: CircularProgressIndicator(value: null));
+    } else if (errorMessage != null) {
+      expandedChild = Center(
+        child: Text(errorMessage),
+      );
+    } else {
+      expandedChild = buildPlacesList();
+    }
+
     return Scaffold(
-      appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Invoke "debug painting" (press "p" in the console, choose the
-          // "Toggle Debug Paint" action from the Flutter Inspector in Android
-          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-          // to see the wireframe for each widget.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Text(
-              'You have pushed the button this many times:',
+        key: homeScaffoldKey,
+        appBar: AppBar(
+          title: const Text("flutter_googlemap"),
+          actions: <Widget>[
+            isLoading
+                ? IconButton(
+              icon: Icon(Icons.timer),
+              onPressed: () {},
+            )
+                : IconButton(
+              icon: Icon(Icons.refresh),
+              onPressed: () {
+                refresh();
+              },
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.display1,
+            IconButton(
+              icon: Icon(Icons.search),
+              onPressed: () {
+                _handlePressButton();
+              },
             ),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+        body: Column(
+          children: <Widget>[
+            Container(
+              child: SizedBox(
+                  height: 200.0,
+                  child: GoogleMap(
+                      onMapCreated: _onMapCreated,
+                      options: GoogleMapOptions(
+                          myLocationEnabled: true,
+                          cameraPosition:
+                          const CameraPosition(target: LatLng(0.0, 0.0))))),
+            ),
+            Expanded(child: expandedChild)
+          ],
+        ));
+  }
+
+  void refresh() async {
+    final center = await getUserLocation();
+
+    mapController.animateCamera(CameraUpdate.newCameraPosition(CameraPosition(
+        target: center == null ? LatLng(0, 0) : center, zoom: 15.0)));
+    getNearbyPlaces(center);
+  }
+
+  void _onMapCreated(GoogleMapController controller) async {
+    mapController = controller;
+    refresh();
+  }
+
+  Future<LatLng> getUserLocation() async {
+    var currentLocation = <String, double>{};
+    final location = LocationManager.Location();
+    try {
+      currentLocation = await location.getLocation();
+      final lat = currentLocation["latitude"];
+      final lng = currentLocation["longitude"];
+      final center = LatLng(lat, lng);
+      return center;
+    } on Exception {
+      currentLocation = null;
+      return null;
+    }
+  }
+
+  void getNearbyPlaces(LatLng center) async {
+    setState(() {
+      this.isLoading = true;
+      this.errorMessage = null;
+    });
+
+    final location = Location(center.latitude, center.longitude);
+    final result = await _places.searchNearbyWithRadius(location, 2500);
+    setState(() {
+      this.isLoading = false;
+      if (result.status == "OK") {
+        this.places = result.results;
+        result.results.forEach((f) {
+          final markerOptions = MarkerOptions(
+              position:
+              LatLng(f.geometry.location.lat, f.geometry.location.lng),
+              infoWindowText: InfoWindowText("${f.name}", "${f.types?.first}"));
+          mapController.addMarker(markerOptions);
+        });
+      } else {
+        this.errorMessage = result.errorMessage;
+      }
+    });
+  }
+
+  void onError(PlacesAutocompleteResponse response) {
+    homeScaffoldKey.currentState.showSnackBar(
+      SnackBar(content: Text(response.errorMessage)),
     );
+  }
+
+  Future<void> _handlePressButton() async {
+    try {
+      final center = await getUserLocation();
+      Prediction p = await PlacesAutocomplete.show(
+          context: context,
+          strictbounds: center == null ? false : true,
+          apiKey: kGoogleApiKey,
+          onError: onError,
+          mode: Mode.fullscreen,
+          language: "en",
+          location: center == null
+              ? null
+              : Location(center.latitude, center.longitude),
+          radius: center == null ? null : 10000);
+
+      showDetailPlace(p.placeId);
+    } catch (e) {
+      return;
+    }
+  }
+
+  Future<Null> showDetailPlace(String placeId) async {
+    if (placeId != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => PlaceDetailWidget(placeId)),
+      );
+    }
+  }
+
+  ListView buildPlacesList() {
+    final placesWidget = places.map((f) {
+      List<Widget> list = [
+        Padding(
+          padding: EdgeInsets.only(bottom: 4.0),
+          child: Text(
+            f.name,
+            style: Theme.of(context).textTheme.subtitle,
+          ),
+        )
+      ];
+      if (f.formattedAddress != null) {
+        list.add(Padding(
+          padding: EdgeInsets.only(bottom: 2.0),
+          child: Text(
+            f.formattedAddress,
+            style: Theme.of(context).textTheme.subtitle,
+          ),
+        ));
+      }
+
+      if (f.vicinity != null) {
+        list.add(Padding(
+          padding: EdgeInsets.only(bottom: 2.0),
+          child: Text(
+            f.vicinity,
+            style: Theme.of(context).textTheme.body1,
+          ),
+        ));
+      }
+
+      if (f.types?.first != null) {
+        list.add(Padding(
+          padding: EdgeInsets.only(bottom: 2.0),
+          child: Text(
+            f.types.first,
+            style: Theme.of(context).textTheme.caption,
+          ),
+        ));
+      }
+
+      return Padding(
+        padding: EdgeInsets.only(top: 4.0, bottom: 4.0, left: 8.0, right: 8.0),
+        child: Card(
+          child: InkWell(
+            onTap: () {
+              showDetailPlace(f.placeId);
+            },
+            highlightColor: Colors.lightBlueAccent,
+            splashColor: Colors.red,
+            child: Padding(
+              padding: EdgeInsets.all(8.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: list,
+              ),
+            ),
+          ),
+        ),
+      );
+    }).toList();
+
+    return ListView(shrinkWrap: true, children: placesWidget);
   }
 }
